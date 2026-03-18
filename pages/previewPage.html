@@ -232,12 +232,22 @@
         panX = e.clientX - dragStartX;
         panY = e.clientY - dragStartY;
         wasDragged = true;
+        fitMode = false;
         applyTransform(zoomLevel);
       }
       function onMouseUp() {
         if (!isDragging) return;
         isDragging = false;
         wrapper.classList.remove("dragging");
+        if (wasDragged) {
+          vscode.setState({
+            svg: wrapper.innerHTML,
+            zoomLevel: zoomLevel,
+            fitMode: fitMode,
+            panX: panX,
+            panY: panY,
+          });
+        }
       }
 
       window.addEventListener("DOMContentLoaded", () => {
