@@ -13,6 +13,7 @@ export class BrowserWindow {
   webViewPanel: WebviewPanel;
   webView: Webview;
   trackerObject?: D2P;
+  private lastSvg: string = "";
 
   constructor(trkObj: D2P) {
     this.trackerObject = trkObj;
@@ -35,7 +36,7 @@ export class BrowserWindow {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [Uri.file(path.join(extContext.extensionPath, "pages"))],
-      }
+      },
     );
     this.webView = this.webViewPanel.webview;
 
@@ -49,6 +50,20 @@ export class BrowserWindow {
         this.trackerObject.outputDoc = undefined;
       }
     });
+
+    this.webViewPanel.onDidChangeViewState(
+      (e) => {
+        if (e.webviewPanel.visible) {
+          if (this.lastSvg) {
+            this.setSvg(this.lastSvg);
+          } else if (this.trackerObject?.inputDoc) {
+            previewGenerator.generate(this.trackerObject.inputDoc, false);
+          }
+        }
+      },
+      this,
+      extContext.subscriptions,
+    );
 
     const isRelative = (p: string) => !/^([a-z]+:)?[\\/]/i.test(p);
 
@@ -84,13 +99,13 @@ export class BrowserWindow {
                 } else {
                   util.openWithDefaultApp(filepath);
                 }
-              }
+              },
             );
           }
         }
       },
       this,
-      extContext.subscriptions
+      extContext.subscriptions,
     );
   }
 
@@ -99,6 +114,7 @@ export class BrowserWindow {
   }
 
   setSvg(svg: string): void {
+    this.lastSvg = svg;
     this.webView.postMessage({ command: "render", data: svg });
   }
 

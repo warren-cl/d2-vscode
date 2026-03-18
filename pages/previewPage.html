@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <title>Diagram</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -78,6 +78,12 @@
         top: 10px;
         left: 0px;
         right: 0px;
+        cursor: grab;
+      }
+
+      #previewWrapper.dragging {
+        cursor: grabbing;
+        user-select: none;
       }
 
       #progressBar {
@@ -138,6 +144,12 @@
       var busyIndicator;
       var toast, toastMsg, toastList;
       var fitMode = true;
+      var panX = 0;
+      var panY = 0;
+      var isDragging = false;
+      var wasDragged = false;
+      var dragStartX = 0;
+      var dragStartY = 0;
       const vscode = acquireVsCodeApi();
 
       function init() {
@@ -165,6 +177,8 @@
         setZoomLevel(zoomLevel);
       }
       function zoomFit() {
+        panX = 0;
+        panY = 0;
         var widthPct = visualViewport.width / wrapper.clientWidth;
         var heightPct = (visualViewport.height - 45) / wrapper.clientHeight;
 
@@ -177,8 +191,11 @@
 
         fitMode = true;
       }
+      function applyTransform(zl) {
+        wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${zl / 100},${zl / 100})`;
+      }
       function setZoomLevel(zl) {
-        wrapper.style.transform = `scale(${zl / 100},${zl / 100})`;
+        applyTransform(zl);
         setZoomText(true);
 
         zoomSlider.value = zl;
@@ -202,8 +219,63 @@
         vscode.postMessage({ command: "refreshPage" });
       }
 
+      function onMouseDown(e) {
+        if (e.button !== 0) return;
+        isDragging = true;
+        wasDragged = false;
+        dragStartX = e.clientX - panX;
+        dragStartY = e.clientY - panY;
+        wrapper.classList.add("dragging");
+      }
+      function onMouseMove(e) {
+        if (!isDragging) return;
+        panX = e.clientX - dragStartX;
+        panY = e.clientY - dragStartY;
+        wasDragged = true;
+        fitMode = false;
+        applyTransform(zoomLevel);
+      }
+      function onMouseUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        wrapper.classList.remove("dragging");
+        if (wasDragged) {
+          vscode.setState({
+            svg: wrapper.innerHTML,
+            zoomLevel: zoomLevel,
+            fitMode: fitMode,
+            panX: panX,
+            panY: panY,
+          });
+        }
+      }
+
       window.addEventListener("DOMContentLoaded", () => {
         init();
+
+        wrapper.addEventListener("mousedown", onMouseDown);
+        window.addEventListener("mousemove", onMouseMove);
+        window.addEventListener("mouseup", onMouseUp);
+        window.addEventListener("mouseleave", onMouseUp);
+
+        // Restore state after webview iframe recreation (e.g. move to auxiliary window)
+        var previousState = vscode.getState();
+        if (previousState && previousState.svg) {
+          wrapper.innerHTML = previousState.svg;
+          if (typeof previousState.panX === "number") {
+            panX = previousState.panX;
+            panY = previousState.panY;
+          }
+          if (previousState.fitMode) {
+            zoomFit();
+          } else if (previousState.zoomLevel) {
+            setZoomLevel(previousState.zoomLevel);
+          }
+          toast.style.opacity = 0.0;
+        } else {
+          // No saved state — ask the extension to re-render
+          refreshPage();
+        }
       });
 
       window.addEventListener(
@@ -218,7 +290,7 @@
             }
           }
         },
-        { passive: false }
+        { passive: false },
       );
 
       window.addEventListener("message", (event) => {
@@ -233,6 +305,13 @@
             } else {
               setZoomLevel(zoomLevel);
             }
+            vscode.setState({
+              svg: message.data,
+              zoomLevel: zoomLevel,
+              fitMode: fitMode,
+              panX: panX,
+              panY: panY,
+            });
             window.postMessage({ command: "hideBusy" });
             break;
           case "showBusy":
@@ -263,13 +342,19 @@
       window.addEventListener(
         "click",
         (event) => {
+          if (wasDragged) {
+            wasDragged = false;
+            event.preventDefault();
+            return;
+          }
           const link = event.target.closest("a[href]");
+          if (!link) return;
           vscode.postMessage({
             command: "clickOnTag_A",
             link: link.href.baseVal || link.href,
           });
         },
-        false
+        false,
       );
     </script>
   </head>
