@@ -25,6 +25,8 @@ d2-vscode/
 │   ├── browserWindow.ts         # WebviewPanel wrapper: renders SVG, handles zoom, link clicks, auxiliary window recovery
 │   ├── taskRunner.ts            # Creates CustomExecution tasks with Pseudoterminal for d2 compilation
 │   ├── tasks.ts                 # D2Tasks: synchronous compile() and format() via spawnSync to d2 CLI
+│   ├── d2BlockFinder.ts         # Pure function: finds ```d2 fenced code blocks in text, returns line ranges + code
+│   ├── d2CodeLensProvider.ts    # CodeLensProvider: "View D2 diagram" for ```d2 blocks in markdown files
 │   ├── refreshTimer.ts          # Debounce timer for auto-update on keystroke (configurable interval)
 │   ├── outputChannel.ts         # D2OutputChannel: timestamped logging to "D2-Output" channel
 │   ├── layoutPicker.ts          # QuickPick: dagre, elk, tala (tala only if d2plugin-tala on PATH)
@@ -41,9 +43,21 @@ d2-vscode/
 ├── themes/
 │   ├── dark-color-theme.json    # D2 Dark editor theme
 │   └── light-color-theme.json   # D2 Light editor theme
-├── test/                        # Sample .d2 and .md files for manual testing (no automated tests)
+├── test/
+│   ├── register.js              # Bootstrap: sets TS_NODE_PROJECT before loading ts-node
+│   ├── tsconfig.json            # Test-specific TypeScript config (includes mocha types)
+│   ├── runTest.ts               # Integration test launcher (uses @vscode/test-electron)
+│   ├── unit/                    # Unit tests (pure logic, no VS Code API dependency)
+│   │   ├── d2BlockFinder.test.ts
+│   │   └── codeLensMapping.test.ts
+│   ├── integration/             # Integration tests (run inside extension host)
+│   │   └── index.ts             # Mocha bootstrap for integration test suite
+│   ├── import.d2                # Sample .d2 files for manual testing
+│   ├── nested.d2
+│   └── nested.md
 ├── language-configuration.json  # Bracket pairs, comments (#, """), indent rules for D2
 ├── webpack.config.js            # Bundles src/ → dist/extension.js (ts-loader, commonjs2, node target)
+├── .mocharc.yml                 # Mocha configuration for unit tests
 ├── eslint.config.mjs            # ESLint 9 flat config with typescript-eslint + prettier
 ├── make.sh                      # CI entry point: fmt, lint, build (uses ci/sub submodule)
 └── package.json                 # Extension manifest: commands, settings, grammars, themes
@@ -103,15 +117,16 @@ DocToPreviewGenerator.generate(doc)
 
 `onStartupFinished` — the extension activates after VS Code finishes startup, regardless of workspace content.
 
-### Registered Commands (5)
+### Registered Commands (6)
 
-| Command                | Description                                  |
-| ---------------------- | -------------------------------------------- |
-| `D2.ShowPreviewWindow` | Open side-by-side SVG preview (Ctrl+Shift+D) |
-| `D2.CompileToSvg`      | Compile .d2 file to .svg on disk             |
-| `D2.PickTheme`         | QuickPick to choose preview theme            |
-| `D2.PickLayout`        | QuickPick to choose layout engine            |
-| `D2.ToggleSketch`      | Toggle sketch rendering mode                 |
+| Command                        | Description                                      |
+| ------------------------------ | ------------------------------------------------ |
+| `D2.ShowPreviewWindow`         | Open side-by-side SVG preview (Ctrl+Shift+D)     |
+| `D2.CompileToSvg`              | Compile .d2 file to .svg on disk                 |
+| `D2.PickTheme`                 | QuickPick to choose preview theme                |
+| `D2.PickLayout`                | QuickPick to choose layout engine                |
+| `D2.ToggleSketch`              | Toggle sketch rendering mode                     |
+| `D2.ViewDiagramFromMarkdown`   | Preview a D2 diagram from a markdown code block  |
 
 ### User Settings (D2.\* namespace)
 
@@ -162,9 +177,42 @@ Initialize submodule first: `git submodule update --init`
 
 ### Testing
 
-There are **no automated tests**. The `test/` directory contains sample `.d2` and `.md` files for manual verification of syntax highlighting and nested markdown parsing.
+This project uses a **two-tier testing strategy**:
 
-Manual testing checklist:
+#### Unit Tests (`test/unit/`)
+
+Run with Mocha + ts-node. These test pure logic that has no dependency on the VS Code API.
+
+```sh
+npm run test:unit    # Run all unit tests
+```
+
+- Tests live in `test/unit/**/*.test.ts`
+- Configured via `.mocharc.yml` + `test/register.js` (sets `TS_NODE_PROJECT`)
+- Test tsconfig: `test/tsconfig.json` (includes mocha types, separate from src tsconfig)
+
+#### Integration Tests (`test/integration/`)
+
+Run inside a VS Code extension host via `@vscode/test-electron`. These test code that depends on `vscode` APIs.
+
+```sh
+npm run test:integration    # Compile + launch extension host tests
+```
+
+- Bootstrap: `test/integration/index.ts`
+- Launcher: `test/runTest.ts`
+
+#### Running All Tests
+
+```sh
+npm test             # Runs unit tests (default)
+```
+
+#### Design Principle: Extract Pure Functions for Testability
+
+The singleton architecture and `vscode` API coupling make many modules hard to unit test. When adding new logic, **always extract pure functions into separate modules** (e.g., `d2BlockFinder.ts`) that can be tested without mocking. Keep VS Code API wrappers thin.
+
+Manual testing checklist (in addition to automated tests):
 
 - Open a `.d2` file, verify syntax highlighting
 - Ctrl+Shift+D → preview opens with rendered SVG
@@ -173,6 +221,7 @@ Manual testing checklist:
 - Right-click → "Compile D2 to SVG" → `.svg` file written
 - Pick Theme / Pick Layout from command palette
 - Open a `.md` file with ` ```d2 ` fenced blocks → rendered in markdown preview
+- Click "View D2 diagram" CodeLens above a ```d2 block in markdown → preview opens
 - Toggle sketch mode
 - "Move Editor Group into New Window" → preview survives in auxiliary window
 - Drag to pan the diagram, verify cursor changes to grabbing
@@ -190,6 +239,9 @@ Manual testing checklist:
 - **webpack** + **ts-loader**: Bundles TypeScript → `dist/extension.js`
 - **TypeScript** 5.6, **ESLint** 9 (flat config + prettier)
 - **@vscode/vsce**: Extension packaging
+- **mocha** + **ts-node**: Unit test runner with TypeScript support
+- **@vscode/test-electron**: Integration test runner (extension host)
+- **@types/mocha**: Type definitions for test globals
 
 ### External
 
@@ -204,6 +256,8 @@ Manual testing checklist:
 | `browserWindow.ts`         | WebviewPanel lifecycle, SVG caching, auxiliary window recovery, link click handling | Generate SVG                                    |
 | `taskRunner.ts`            | Creates VS Code Task + Pseudoterminal for d2 compilation          | Run d2 directly (delegates to d2Tasks)          |
 | `tasks.ts`                 | `spawnSync` to d2 CLI for compile and format                      | Manage UI or webviews                           |
+| `d2BlockFinder.ts`         | Pure function: finds ```d2 fenced blocks in text, returns ranges + code | Interact with VS Code APIs                      |
+| `d2CodeLensProvider.ts`    | CodeLensProvider mapping D2 blocks to "View D2 diagram" lenses    | Compile D2 or manage webviews                   |
 | `refreshTimer.ts`          | Debounce keystroke→preview updates                                | Know about D2 or compilation                    |
 | `themePicker.ts`           | Theme name↔number mapping, QuickPick UI                           | Apply themes (config update triggers re-render) |
 | `layoutPicker.ts`          | Layout QuickPick, detects tala plugin on PATH                     | Apply layouts                                   |
@@ -221,5 +275,78 @@ Manual testing checklist:
 8. **Theme number mapping** — `NameToThemeNumber()` in `themePicker.ts` must stay in sync with the theme enum in `package.json` settings. If D2 adds new themes, both must be updated.
 9. **Tala detection** — `layoutPicker.ts` dynamically adds/removes the tala option based on PATH detection at picker creation time, not at activation.
 10. **hardSave flag** — The `updateOnSave` flow uses a closure variable `hardSave` to distinguish manual saves from auto-saves. This is fragile — don't refactor save handling without preserving this distinction.
-11. **No tests** — There is no test infrastructure. If adding tests, note that the singleton architecture and `spawnSync` usage make unit testing challenging. Consider extracting pure functions first.
+11. **Test-driven development is mandatory** — See the "Test-Driven Development (TDD) Requirements" section below. All new logic must be accompanied by tests. Never skip the Red→Green→Refactor cycle.
 12. **`previewPage.html` uses `innerHTML`** — The webview sets `wrapper.innerHTML = message.data` with SVG from the d2 CLI. This is trusted input from a local binary, but be aware of this if the trust model changes.
+
+## Test-Driven Development (TDD) Requirements
+
+**TDD is mandatory for all changes to this repository.** Every new feature, bug fix, or refactor that touches logic must follow the Red→Green→Refactor cycle. No exceptions.
+
+### The TDD Cycle
+
+Every change MUST follow these steps in order:
+
+1. **Red** — Write a failing test FIRST. The test must:
+   - Target the specific behavior being added or changed
+   - Fail for the right reason (not a syntax error or import failure)
+   - Be committed or at least runnable before any implementation begins
+
+2. **Green** — Write the MINIMUM code to make the failing test pass. Do not:
+   - Add extra features beyond what the test requires
+   - Optimize prematurely
+   - Skip running the test suite to confirm green
+
+3. **Refactor** — Clean up the implementation while keeping all tests green. This is the ONLY phase where you restructure code, extract helpers, or improve naming.
+
+4. **Verify** — Run the full test suite (`npm run test:unit`) after every cycle. All tests must pass before moving on.
+
+### What MUST Be Tested
+
+| Change Type | Required Tests |
+| --- | --- |
+| New pure logic function | Unit tests in `test/unit/` covering normal cases, edge cases, and error cases |
+| Bug fix | A regression test that reproduces the bug BEFORE writing the fix |
+| New VS Code API integration | Integration test in `test/integration/` if it depends on vscode APIs; extract and unit-test any pure logic separately |
+| Refactoring existing code | Ensure existing tests still pass; add tests for any previously untested paths you touch |
+
+### What Does NOT Require Tests
+
+- Purely declarative changes (package.json settings, grammar files, theme JSON)
+- Documentation-only changes
+- HTML/CSS-only changes to `previewPage.html` (these require manual testing per the checklist)
+
+### How to Write Testable Code
+
+The singleton architecture makes direct unit testing of most modules impossible. Follow these rules:
+
+1. **Extract pure functions** — Any logic that does not require the VS Code API MUST be extracted into a standalone module with no `vscode` imports. Example: `d2BlockFinder.ts` is a pure function that `d2CodeLensProvider.ts` calls. The pure function is unit-tested; the provider is a thin untested wrapper.
+
+2. **Keep VS Code wrappers thin** — Modules that import from `vscode` should contain only wiring/glue code. All decision-making, parsing, transformation, and validation logic belongs in pure modules.
+
+3. **Never add logic to extension.ts** — `extension.ts` is a wiring file. If you need to add behavior, create a new module and register it from `extension.ts`.
+
+4. **Function signatures should accept data, not VS Code objects** — Prefer `function process(text: string)` over `function process(doc: TextDocument)`. This makes the function testable without mocking.
+
+### Test File Conventions
+
+- Unit tests go in `test/unit/<moduleName>.test.ts`
+- Integration tests go in `test/integration/<feature>.test.ts`
+- Test files must import from `../../src/<module>` (relative paths)
+- Use `strict` assert: `import { strict as assert } from "assert"`
+- Use descriptive `describe`/`it` blocks that read as specifications
+- One `describe` block per module/function under test
+
+### Running Tests
+
+```sh
+npm run test:unit           # Run unit tests (fast, no VS Code required)
+npm run test:integration    # Run integration tests (launches extension host)
+npm test                    # Default: runs unit tests
+```
+
+### Enforcement
+
+- **No PR should be merged without tests** for any logic changes
+- **Agents must run `npm run test:unit` and confirm all tests pass** before declaring any task complete
+- **If you cannot write a test for a change**, explain why in a code comment and add the scenario to the manual testing checklist above
+- **Agents that skip the Red phase** (writing implementation before the failing test) are violating this policy — the test must exist and fail before the implementation

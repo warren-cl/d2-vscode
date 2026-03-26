@@ -12,6 +12,7 @@ import {
   TextDocumentWillSaveEvent,
   TextEdit,
   Uri,
+  ViewColumn,
   window,
   workspace,
   WorkspaceConfiguration,
@@ -25,14 +26,15 @@ import { themePicker } from "./themePicker";
 import { TaskRunner } from "./taskRunner";
 import { d2Tasks } from "./tasks";
 import { util } from "./utility";
+import { D2CodeLensProvider } from "./d2CodeLensProvider";
 import * as path from "path";
+import { readFileSync } from "fs";
 import { TextEncoder } from "util";
 
 export const d2Ext = "d2";
 export const d2Lang = "d2";
 export const previewGenerator: DocToPreviewGenerator = new DocToPreviewGenerator();
 export const d2ConfigSection = "D2";
-export const d2TaskName = "D2 Task";
 export let ws: WorkspaceConfiguration = workspace.getConfiguration(d2ConfigSection);
 export const outputChannel: D2OutputChannel = new D2OutputChannel();
 export const taskRunner: TaskRunner = new TaskRunner();
@@ -43,6 +45,10 @@ export type VSCAny = any;
 
 export function activate(context: ExtensionContext): VSCAny {
   extContext = context;
+
+  const diagnosticCollection = languages.createDiagnosticCollection("d2");
+  context.subscriptions.push(diagnosticCollection);
+  taskRunner.setDiagnosticCollection(diagnosticCollection);
 
   context.subscriptions.push(
     workspace.onDidChangeConfiguration(() => {
@@ -59,7 +65,7 @@ export function activate(context: ExtensionContext): VSCAny {
           previewGenerator.generate(activeEditor.document);
         }
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -72,7 +78,7 @@ export function activate(context: ExtensionContext): VSCAny {
           trk?.timer?.reset();
         }
       }
-    })
+    }),
   );
 
   // User actually forced a save, NOT auto save
@@ -83,7 +89,7 @@ export function activate(context: ExtensionContext): VSCAny {
       if (e.document.languageId === d2Ext) {
         hardSave = e.reason === TextDocumentSaveReason.Manual;
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -100,7 +106,7 @@ export function activate(context: ExtensionContext): VSCAny {
 
         hardSave = false;
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -108,7 +114,7 @@ export function activate(context: ExtensionContext): VSCAny {
       if (doc.languageId === d2Ext) {
         previewGenerator.createObjectToTrack(doc);
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -116,7 +122,7 @@ export function activate(context: ExtensionContext): VSCAny {
       if (doc.languageId === d2Ext) {
         previewGenerator.deleteObjectToTrack(doc);
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -129,7 +135,7 @@ export function activate(context: ExtensionContext): VSCAny {
         const trk = previewGenerator.getTrackObject(activeEditor.document);
         trk?.outputDoc?.show();
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -160,7 +166,7 @@ export function activate(context: ExtensionContext): VSCAny {
           });
         });
       });
-    })
+    }),
   );
 
   languages.registerDocumentFormattingEditProvider(
@@ -168,7 +174,7 @@ export function activate(context: ExtensionContext): VSCAny {
     {
       provideDocumentFormattingEdits(document: TextDocument): TextEdit[] {
         const documentEditor = window.visibleTextEditors.find(
-          (editor) => editor.document === document
+          (editor) => editor.document === document,
         );
 
         if (documentEditor) {
@@ -177,7 +183,7 @@ export function activate(context: ExtensionContext): VSCAny {
 
         return [];
       },
-    }
+    },
   );
 
   context.subscriptions.push(
@@ -192,7 +198,7 @@ export function activate(context: ExtensionContext): VSCAny {
           }
         });
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -207,7 +213,7 @@ export function activate(context: ExtensionContext): VSCAny {
           }
         });
       }
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -218,7 +224,51 @@ export function activate(context: ExtensionContext): VSCAny {
         const current: boolean = ws.get("previewSketch", false);
         ws.update("previewSketch", !current, true);
       }
-    })
+    }),
+  );
+
+  // CodeLens: "View D2 diagram" for ```d2 blocks in markdown
+  context.subscriptions.push(
+    languages.registerCodeLensProvider(
+      { language: "markdown", scheme: "file" },
+      new D2CodeLensProvider(),
+    ),
+  );
+
+  context.subscriptions.push(
+    commands.registerCommand(
+      "D2.ViewDiagramFromMarkdown",
+      (code: string, sourceUri: Uri) => {
+        const filePath = sourceUri ? path.parse(sourceUri.fsPath).dir : "";
+        const svg = d2Tasks.compile(code, filePath, (msg) => {
+          outputChannel.appendInfo(msg);
+        });
+
+        if (!svg) {
+          window.showErrorMessage("D2 compilation failed. Check the Problems panel.");
+          return;
+        }
+
+        const panel = window.createWebviewPanel(
+          "d2EmbeddedPreview",
+          "D2 Diagram Preview",
+          ViewColumn.Beside,
+          {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [Uri.file(path.join(extContext.extensionPath, "pages"))],
+          },
+        );
+
+        const htmlPath = path.join(extContext.extensionPath, "pages/previewPage.html");
+        panel.webview.html = readFileSync(htmlPath, "utf-8");
+
+        // Send SVG after webview is ready
+        setTimeout(() => {
+          panel.webview.postMessage({ command: "render", data: svg });
+        }, 200);
+      },
+    ),
   );
 
   /** Find all open d2 files and add to tracker if they are
@@ -262,7 +312,7 @@ export function extendMarkdownItWithD2(md: VSCAny): unknown {
   md.options.highlight = (code: string, lang: string) => {
     if (lang === d2Lang) {
       const activeEditor = path.parse(
-        window.activeTextEditor?.document.fileName ?? ""
+        window.activeTextEditor?.document.fileName ?? "",
       ).dir;
 
       return d2Tasks.compile(code, activeEditor, (msg) => {

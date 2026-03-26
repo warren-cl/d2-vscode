@@ -30,30 +30,6 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "taskDefinitions": [
-      {
-        "type": "D2"
-      }
-    ],
-    "problemMatchers": [
-      {
-        "name": "D2Matcher",
-        "owner": "D2 Extension",
-        "fileLocation": [
-          "autoDetect",
-          "${cwd}"
-        ],
-        "pattern": {
-          "regexp": "^\\[(.*)\\] (err):([A-Za-z\\s]*)([\\:]*\\s)(\\d+):(\\d+):(.*)$",
-          "file": 1,
-          "severity": 2,
-          "code": 3,
-          "line": 5,
-          "column": 6,
-          "message": 7
-        }
-      }
-    ],
     "languages": [
       {
         "id": "d2",
@@ -125,6 +101,11 @@
       {
         "command": "D2.ToggleSketch",
         "title": "Toggle Preview Sketch Rendering",
+        "category": "d2"
+      },
+      {
+        "command": "D2.ViewDiagramFromMarkdown",
+        "title": "View D2 Diagram from Markdown",
         "category": "d2"
       }
     ],
@@ -310,7 +291,10 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "dev": "code --uninstall-extension terrastruct.d2; yarn gen && yarn pkg && code --install-extension d2.vsix",
     "gen": "yq -o=json . syntaxes/d2.tmLanguage.yaml > syntaxes/d2.tmLanguage.json",
-    "pkg": "vsce package --out d2.vsix"
+    "pkg": "vsce package --out d2.vsix",
+    "test:unit": "mocha",
+    "test:integration": "tsc -p test/tsconfig.json && node out/test/test/runTest.js",
+    "test": "npm run test:unit"
   },
   "devDependencies": {
     "@eslint-community/eslint-utils": "^4.4.1",
@@ -336,6 +320,7 @@
     "mocha": "^10.4.0",
     "prettier": "^3.2.5",
     "ts-loader": "^9.4.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.18.0",
     "webpack": "^5.96.1",
