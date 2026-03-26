@@ -1,7 +1,7 @@
 import * as path from "path";
-import { TaskEndEvent, tasks, TextDocument } from "vscode";
+import { TextDocument } from "vscode";
 import { BrowserWindow } from "./browserWindow";
-import { d2TaskName, outputChannel, taskRunner } from "./extension";
+import { outputChannel, taskRunner } from "./extension";
 import { RefreshTimer } from "./refreshTimer";
 import { statSync } from "fs";
 import { Mutex } from "async-mutex";
@@ -30,13 +30,8 @@ export class DocToPreviewGenerator {
   mapOfConnection: Map<TextDocument, D2P> = new Map<TextDocument, D2P>();
 
   constructor() {
-    // Since this object is a singleton, we don't need to dispose
-    // this event each time the object is disposed.
-    tasks.onDidEndTask((e: TaskEndEvent) => {
-      if (e.execution.task.name === d2TaskName) {
-        this.mutex.release();
-      }
-    });
+    // No event listener needed — genTask() is synchronous,
+    // so mutex is released directly after generate() returns.
   }
 
   createObjectToTrack(inDoc: TextDocument): D2P {
@@ -86,8 +81,8 @@ export class DocToPreviewGenerator {
       [...this.mapOfConnection.entries()].sort(
         (a: [TextDocument, D2P], b: [TextDocument, D2P]): number => {
           return b[1].fileDateTime - a[1].fileDateTime;
-        }
-      )
+        },
+      ),
     );
 
     // Regenerate the browser view for all open d2 documents, since
@@ -96,6 +91,7 @@ export class DocToPreviewGenerator {
     fileMap.forEach((_: D2P, td: TextDocument) => {
       this.mutex.acquire().then(() => {
         this.generate(td, false);
+        this.mutex.release();
       });
     });
   }

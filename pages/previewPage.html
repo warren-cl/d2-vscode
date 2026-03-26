@@ -272,6 +272,7 @@
             setZoomLevel(previousState.zoomLevel);
           }
           toast.style.opacity = 0.0;
+          busyIndicator.style.visibility = "hidden";
         } else {
           // No saved state — ask the extension to re-render
           refreshPage();
@@ -312,7 +313,7 @@
               panX: panX,
               panY: panY,
             });
-            window.postMessage({ command: "hideBusy" });
+            busyIndicator.style.visibility = "hidden";
             break;
           case "showBusy":
             busyIndicator.style.visibility = "visible";
@@ -407,7 +408,7 @@
       <div id="toastMsg">Loading...</div>
       <ul id="toastList"></ul>
     </div>
-    <div id="progressBar">
+    <div id="progressBar" style="visibility: hidden">
       <progress></progress>
     </div>
   </body>
